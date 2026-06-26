@@ -1,41 +1,60 @@
-function renderMatches(matches) {
-  const container = document.getElementById("liveContainer");
+function renderGroups(groups){
 
-  if (!matches.length) {
-    container.innerHTML = "<p>No matches available.</p>";
-    return;
-  }
+  const container =
+    document.getElementById(
+      "groupContainer"
+    );
 
-  container.innerHTML = matches
-    .slice(0, 20)
-    .map(match => {
-      const comp = match.competitions?.[0];
+  container.innerHTML="";
 
-      if (!comp) return "";
+  Object.entries(groups)
+    .forEach(([group,teams])=>{
 
-      const home = comp.competitors?.find(
-        c => c.homeAway === "home"
-      );
+      const block =
+        document.createElement("div");
 
-      const away = comp.competitors?.find(
-        c => c.homeAway === "away"
-      );
+      block.className =
+        "match-card";
 
-      return `
-        <div class="match-card">
-          <div class="teams">
-            <strong>${home?.team?.displayName || "?"}</strong>
-            ${home?.score || 0}
-            -
-            ${away?.score || 0}
-            <strong>${away?.team?.displayName || "?"}</strong>
-          </div>
+      const rows =
+        Object.entries(teams)
+        .map(([team,stats])=>`
+          <tr>
+            <td>${team}</td>
+            <td>${stats.pts}</td>
+          </tr>
+        `)
+        .join("");
 
-          <div class="status">
-            ${match.status?.type?.description || ""}
-          </div>
-        </div>
+      block.innerHTML=`
+        <h3>${group}</h3>
+        <table>
+          ${rows}
+        </table>
       `;
-    })
+
+      container.appendChild(block);
+
+    });
+
+}
+
+function renderBracket(matches){
+
+  const container =
+    document.getElementById(
+      "bracketContainer"
+    );
+
+  container.innerHTML =
+    matches
+    .map(m=>`
+      <div class="match-card">
+        ${m.home}
+        vs
+        ${m.away}
+      </div>
+    `)
     .join("");
+
 }
