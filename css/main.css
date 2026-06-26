@@ -1,1 +1,35 @@
+body{
+  margin:0;
+  font-family:Arial,sans-serif;
+  background:#08111f;
+  color:white;
+}
 
+header{
+  text-align:center;
+  padding:20px;
+}
+
+h1{
+  margin-bottom:5px;
+}
+
+section{
+  padding:20px;
+}
+
+.match-card{
+  background:#111c2f;
+  padding:15px;
+  margin-bottom:12px;
+  border-radius:12px;
+}
+
+.teams{
+  font-size:18px;
+}
+
+.status{
+  opacity:.75;
+  margin-top:8px;
+}
