@@ -310,6 +310,22 @@
   }
   .team-row.loser .score{ color:var(--paper-dim); }
 
+  .events-timeline{
+    margin-top: 9px; padding-top: 8px;
+    border-top: 1px solid var(--line);
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .event-row{
+    display: grid; grid-template-columns: 32px 18px 1fr;
+    align-items: baseline; gap: 6px;
+    font-size: 11.5px; color: var(--paper-dim);
+  }
+  .event-min{ font-family: var(--mono); font-size: 10.5px; color: var(--paper-faint); }
+  .event-icon{ font-size: 12px; }
+  .event-team{ display: none; } /* team name implied by player; kept in DOM for potential future grouping */
+  .event-detail{ color: var(--paper); }
+  .event-detail strong{ font-weight: 700; }
+
   .match-bottom{
     display:flex; justify-content:space-between; align-items:center;
     margin-top:9px; padding-top:8px;
@@ -535,12 +551,11 @@
   </div>
   <nav class="tabs" id="tabNav">
     <button data-target="current" class="active">Current</button>
-    <button data-target="next">Next</button>
+    <button data-target="r32">Round of 32</button>
     <button data-target="results">Results</button>
+    <button data-target="leaders">Leaders</button>
     <button data-target="groups">Groups</button>
     <button data-target="third">3rd Place</button>
-    <button data-target="r32">Round of 32</button>
-    <button data-target="leaders">Leaders</button>
   </nav>
   <div class="updated-row">
     <span class="src-tag">Data: <b id="sourceTag">ESPN</b></span>
@@ -579,14 +594,16 @@
     </div>
   </section>
 
-  <section class="section" id="next">
+  <section class="section" id="r32">
     <div class="section-head">
-      <h2><span class="dash"></span>Next Games</h2>
-      <span class="meta">next 4 upcoming · SGT</span>
+      <h2><span class="dash"></span>Round of 32</h2>
+      <span class="meta" id="r32Meta">Jun 28 – Jul 4 · SGT</span>
     </div>
-    <div class="match-grid" id="nextGrid">
-      <div class="skel" style="height:96px;"></div>
-      <div class="skel" style="height:96px;"></div>
+    <div class="r32-grid" id="r32Grid">
+      <div class="skel" style="height:108px;"></div>
+      <div class="skel" style="height:108px;"></div>
+      <div class="skel" style="height:108px;"></div>
+      <div class="skel" style="height:108px;"></div>
     </div>
   </section>
 
@@ -598,41 +615,6 @@
     <div class="match-grid" id="resultsGrid">
       <div class="skel" style="height:96px;"></div>
       <div class="skel" style="height:96px;"></div>
-    </div>
-  </section>
-
-  <section class="section" id="groups">
-    <div class="section-head">
-      <h2><span class="dash"></span>Group Tables</h2>
-      <span class="meta">all 12 groups</span>
-    </div>
-    <div class="groups-grid" id="groupsGrid">
-      <div class="skel" style="height:160px;"></div>
-      <div class="skel" style="height:160px;"></div>
-      <div class="skel" style="height:160px;"></div>
-    </div>
-  </section>
-
-  <section class="section" id="third">
-    <div class="section-head">
-      <h2><span class="dash"></span>3rd Place Race</h2>
-      <span class="meta">best 3rd-placed teams · top 8 advance</span>
-    </div>
-    <div class="third-list" id="thirdList">
-      <div class="skel" style="height:240px;"></div>
-    </div>
-  </section>
-
-  <section class="section" id="r32">
-    <div class="section-head">
-      <h2><span class="dash"></span>Round of 32</h2>
-      <span class="meta" id="r32Meta">Jun 28 – Jul 4 · SGT</span>
-    </div>
-    <div class="r32-grid" id="r32Grid">
-      <div class="skel" style="height:108px;"></div>
-      <div class="skel" style="height:108px;"></div>
-      <div class="skel" style="height:108px;"></div>
-      <div class="skel" style="height:108px;"></div>
     </div>
   </section>
 
@@ -689,6 +671,30 @@
       </div>
     </div>
     <p class="proxy-note">"Rating" is API-Football's own per-match performance rating, averaged across appearances — a different methodology from Sofascore's ratings (which can't be pulled into a live static dashboard; see note below). Not an official FIFA award.</p>
+  </section>
+
+  <section class="section" id="groups">
+    <div class="section-head">
+      <h2><span class="dash"></span>Group Tables</h2>
+      <span class="meta">final · all 12 groups</span>
+    </div>
+    <p class="proxy-note">Group stage concluded June 28 — these tables are now final and won't change. Kept here for reference.</p>
+    <div class="groups-grid" id="groupsGrid">
+      <div class="skel" style="height:160px;"></div>
+      <div class="skel" style="height:160px;"></div>
+      <div class="skel" style="height:160px;"></div>
+    </div>
+  </section>
+
+  <section class="section" id="third">
+    <div class="section-head">
+      <h2><span class="dash"></span>3rd Place Race</h2>
+      <span class="meta">final · 8 qualified</span>
+    </div>
+    <p class="proxy-note">Final standings — the 8 qualifying third-place teams are now locked in and reflected in the Round of 32 matchups above.</p>
+    <div class="third-list" id="thirdList">
+      <div class="skel" style="height:240px;"></div>
+    </div>
   </section>
 
 </main>
@@ -759,6 +765,21 @@
     return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   }
 
+  // ESPN and API-Football sometimes format the same country differently
+  // (e.g. "South Korea" vs "Korea Republic", "USA" vs "United States").
+  // Lowercasing + stripping common variants gives a reasonably reliable match key.
+  function normalizeTeamName(name){
+    if(!name) return "";
+    let n = name.toLowerCase().trim();
+    const aliasMap = {
+      "korea republic": "south korea",
+      "ivory coast": "cote d'ivoire",
+      "usa": "united states",
+      "bosnia and herzegovina": "bosnia-herzegovina",
+    };
+    return aliasMap[n] || n;
+  }
+
   function teamLogo(team){
     if(!team) return null;
     return (team.logo) || (team.logos && team.logos[0] && team.logos[0].href) || null;
@@ -821,7 +842,36 @@
 
 
   // ---------------- Render: match card (scores) ----------------
-  function renderMatchCard(ev){
+  function renderEventsTimelineHtml(events){
+    if(!events || !events.length) return "";
+    // Sort chronologically, goals and cards only (skip subs to keep it focused on scoring)
+    const relevant = events
+      .filter(e => e.type === "Goal" || e.type === "Card")
+      .sort((a,b)=> (a.time.elapsed - b.time.elapsed));
+    if(!relevant.length) return "";
+
+    const rows = relevant.map(e => {
+      const minute = e.time.elapsed + (e.time.extra ? "+" + e.time.extra : "") + "'";
+      const isGoal = e.type === "Goal";
+      const isCard = e.type === "Card";
+      const icon = isGoal ? "⚽" : (e.detail && e.detail.includes("Red") ? "🟥" : "🟨");
+      const playerName = (e.player && e.player.name) || "Unknown";
+      const assistName = (e.assist && e.assist.name) || null;
+      let line = `<strong>${escapeHtml(playerName)}</strong>`;
+      if(isGoal && assistName) line += ` <span style="color:var(--paper-faint);">(assist: ${escapeHtml(assistName)})</span>`;
+      if(isCard) line += ` <span style="color:var(--paper-faint);">${escapeHtml(e.detail||"")}</span>`;
+      return `<div class="event-row">
+        <span class="event-min">${escapeHtml(minute)}</span>
+        <span class="event-icon">${icon}</span>
+        <span class="event-team">${escapeHtml((e.team && e.team.name) || "")}</span>
+        <span class="event-detail">${line}</span>
+      </div>`;
+    }).join("");
+
+    return `<div class="events-timeline">${rows}</div>`;
+  }
+
+  function renderMatchCard(ev, eventsTimeline){
     const comp = ev.competitions && ev.competitions[0];
     if(!comp) return "";
     const state = comp.status && comp.status.type && comp.status.type.state; // pre | in | post
@@ -859,6 +909,7 @@
     }
 
     const liveClass = state === "in" ? " is-live" : "";
+    const timelineHtml = (state === "in" || state === "post") ? renderEventsTimelineHtml(eventsTimeline) : "";
 
     return `<div class="match-card${liveClass}">
       <div class="match-top">
@@ -867,6 +918,7 @@
       </div>
       ${row(home, homeScore, homeWin, awayWin)}
       ${row(away, awayScore, awayWin, homeWin)}
+      ${timelineHtml}
       <div class="match-bottom">
         <span>${escapeHtml(venue)}</span>
         <span>${state === "pre" ? escapeHtml(fmtDateShortSGT(comp.date)) : ""}</span>
@@ -1021,7 +1073,7 @@
     return null;
   }
 
-  function renderR32Card(fix, groupLookup, qualifiedThirdLetters, espnEventsByTeamPair){
+  function renderR32Card(fix, groupLookup, qualifiedThirdLetters, espnEventsByTeamPair, liveEventsByPair){
     const homeEntry = resolveSlotTeam(fix.home, groupLookup, qualifiedThirdLetters);
     const awayEntry = resolveSlotTeam(fix.away, groupLookup, qualifiedThirdLetters);
 
@@ -1044,6 +1096,7 @@
     let whenHtml = `<span class="r32-when">${escapeHtml(new Date(fix.dateSGT+"T00:00:00+08:00").toLocaleDateString("en-GB",{day:'numeric',month:'short',timeZone:SGT_TZ}))} SGT</span>`;
     let homeScoreHtml = "", awayScoreHtml = "";
     let homeRowCls = "", awayRowCls = "";
+    let timelineHtml = "";
 
     if(liveEvent){
       const comp = liveEvent.competitions[0];
@@ -1064,6 +1117,13 @@
         if(awayC && awayC.winner) awayRowCls = " winner-row";
       } else {
         whenHtml = `<span class="r32-when">${escapeHtml(fmtMatchTimeSGT(comp.date))} SGT</span>`;
+      }
+
+      if((state === "in" || state === "post") && liveEventsByPair){
+        const n1 = normalizeTeamName(homeTeam.shortDisplayName || homeTeam.displayName);
+        const n2 = normalizeTeamName(awayTeam.shortDisplayName || awayTeam.displayName);
+        const evList = liveEventsByPair[n1+"|"+n2] || liveEventsByPair[n2+"|"+n1] || null;
+        timelineHtml = renderEventsTimelineHtml(evList);
       }
     }
 
@@ -1087,11 +1147,12 @@
       ${teamSlotHtml(homeTeam, fix.home, homeScoreHtml, homeRowCls)}
       <div class="r32-vs">vs</div>
       ${teamSlotHtml(awayTeam, fix.away, awayScoreHtml, awayRowCls)}
+      ${timelineHtml}
       <div class="r32-venue">${escapeHtml(fix.venue)}</div>
     </div>`;
   }
 
-  function renderR32Section(groups, scoreboardEvents){
+  function renderR32Section(groups, scoreboardEvents, liveEventsByPair){
     const groupLookup = buildGroupLookup(groups);
     const thirds = compute3rdPlaceRanking(groups);
 
@@ -1123,7 +1184,7 @@
       return emptyNote("Round of 32 matchups will be calculated once group standings are available.");
     }
 
-    return R32_FIXTURES.map(fix => renderR32Card(fix, groupLookup, qualifiedThirdLetters, eventsByPair)).join("");
+    return R32_FIXTURES.map(fix => renderR32Card(fix, groupLookup, qualifiedThirdLetters, eventsByPair, liveEventsByPair)).join("");
   }
 
 
@@ -1247,9 +1308,17 @@
         leaders = ld.data;
       }catch(e){ /* optional, not used for leader cards anymore but kept for potential future ESPN cross-check */ }
 
-      renderScoreboardSections(scoreboard);
+      // Only hit API-Football's live-fixtures/events endpoints when ESPN says
+      // a match is actually in progress — avoids burning calls when nothing's live.
+      if(hasLiveGame(scoreboard)){
+        await loadLiveEvents();
+      } else {
+        liveEventsByTeamPair = {};
+      }
+
+      renderScoreboardSections(scoreboard, liveEventsByTeamPair);
       const groups = renderStandingsSections(standings);
-      renderR32(groups, scoreboard);
+      renderR32(groups, scoreboard, liveEventsByTeamPair);
 
       $("sourceTag").textContent = sourceLabel;
       const nowSGT = new Date();
@@ -1272,30 +1341,30 @@
     });
   }
 
-  function renderScoreboardSections(scoreboard){
+  function renderScoreboardSections(scoreboard, liveEventsByTeamPair){
     const events = (scoreboard && scoreboard.events) || [];
     const withComp = events.filter(e => e.competitions && e.competitions[0]);
 
     const live = withComp.filter(e => e.competitions[0].status.type.state === "in");
-    const upcoming = withComp
-      .filter(e => e.competitions[0].status.type.state === "pre")
-      .sort((a,b)=> new Date(a.competitions[0].date) - new Date(b.competitions[0].date));
     const completed = withComp
       .filter(e => e.competitions[0].status.type.state === "post")
       .sort((a,b)=> new Date(b.competitions[0].date) - new Date(a.competitions[0].date));
 
+    function eventsForMatch(ev){
+      if(!liveEventsByTeamPair) return null;
+      const comp = ev.competitions[0];
+      const names = (comp.competitors||[]).map(c => normalizeTeamName(c.team.shortDisplayName || c.team.displayName));
+      if(names.length !== 2) return null;
+      return liveEventsByTeamPair[names[0]+"|"+names[1]] || liveEventsByTeamPair[names[1]+"|"+names[0]] || null;
+    }
+
     $("currentGrid").innerHTML = live.length
-      ? live.map(renderMatchCard).join("")
+      ? live.map(ev => renderMatchCard(ev, eventsForMatch(ev))).join("")
       : emptyNote("No matches in progress right now.");
     $("currentMeta").textContent = live.length ? live.length + " live" : "none live";
 
-    // Next 4 upcoming, strictly sorted soonest-first, in SGT
-    $("nextGrid").innerHTML = upcoming.length
-      ? upcoming.slice(0,4).map(renderMatchCard).join("")
-      : emptyNote("No upcoming fixtures found.");
-
     $("resultsGrid").innerHTML = completed.length
-      ? completed.slice(0,4).map(renderMatchCard).join("")
+      ? completed.slice(0,4).map(ev => renderMatchCard(ev)).join("")
       : emptyNote("No completed matches yet.");
   }
 
@@ -1312,9 +1381,9 @@
     return groups;
   }
 
-  function renderR32(groups, scoreboard){
+  function renderR32(groups, scoreboard, liveEventsByPair){
     const events = (scoreboard && scoreboard.events) || [];
-    $("r32Grid").innerHTML = renderR32Section(groups, events);
+    $("r32Grid").innerHTML = renderR32Section(groups, events, liveEventsByPair);
   }
 
   // ============================================================
@@ -1402,7 +1471,48 @@
     return head + rows;
   }
 
-  let isAfLoading = false;
+  // ============================================================
+  // LIVE EVENTS (goals/cards) for Current Games cards.
+  // Fetches live World Cup fixtures from API-Football, then events for
+  // each, keyed by normalized team-name pair so ESPN's match cards (which
+  // use a different ID system) can look up the right timeline.
+  // Cheap: 1 call for live fixtures + 1 call per live match for events —
+  // at most a handful of calls even when several games are live at once.
+  // ============================================================
+  let liveEventsByTeamPair = {};
+
+  async function loadLiveEvents(){
+    try{
+      const liveResp = await afFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=1H-HT-2H-ET-P-BT-LIVE`);
+      updateQuotaDisplay();
+      const liveFixtures = liveResp.response || [];
+
+      const newLookup = {};
+      // Fetch events for each live fixture (small number at any given time)
+      for(const fx of liveFixtures){
+        const fixtureId = fx.fixture && fx.fixture.id;
+        if(!fixtureId) continue;
+        const homeName = normalizeTeamName(fx.teams && fx.teams.home && fx.teams.home.name);
+        const awayName = normalizeTeamName(fx.teams && fx.teams.away && fx.teams.away.name);
+        if(!homeName || !awayName) continue;
+
+        try{
+          const evResp = await afFetch(`/fixtures/events?fixture=${fixtureId}`);
+          updateQuotaDisplay();
+          newLookup[homeName+"|"+awayName] = evResp.response || [];
+        }catch(e){
+          console.error("Failed to fetch events for live fixture", fixtureId, e);
+        }
+      }
+      liveEventsByTeamPair = newLookup;
+    }catch(err){
+      console.error("loadLiveEvents failed", err);
+      // Leave liveEventsByTeamPair as-is (likely empty) — match cards simply
+      // won't show a timeline, which is a safe, non-breaking fallback.
+    }
+  }
+
+
 
   async function loadApiFootballRankings(){
     if(isAfLoading) return; // avoid overlapping auto-refresh calls
