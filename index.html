@@ -312,6 +312,11 @@
   }
   .team-row.loser .score{ color:var(--paper-dim); }
 
+  .pk-note{
+    font-family: var(--mono); font-size: 10.5px; color: var(--gold-bright);
+    margin-top: 4px; font-weight: 600;
+  }
+
   .events-timeline{
     margin-top: 9px; padding-top: 8px;
     border-top: 1px solid var(--line);
@@ -834,7 +839,7 @@
     { match: 75, dateSGT: "2026-06-30", venue: "Monterrey, Mexico",     home: {group:"F", slot:"1st"}, away: {group:"C", slot:"2nd"} },  // Netherlands vs Morocco
     { match: 76, dateSGT: "2026-06-30", venue: "Houston, USA",          home: {group:"C", slot:"1st"}, away: {group:"F", slot:"2nd"} },  // Brazil vs Japan
     { match: 77, dateSGT: "2026-07-01", venue: "East Rutherford, USA",  home: {group:"I", slot:"1st"}, away: {group:"3rd", from:["F"]} }, // France vs Sweden
-    { match: 78, dateSGT: "2026-07-01", venue: "Dallas, USA",           home: {group:"E", slot:"2nd"}, away: {group:"3rd", from:["K"]} }, // Ivory Coast vs Norway (Norway=G3... actually Grp F3 Sweden gone to M77; Norway is Grp L3? Let ESPN data resolve)
+    { match: 78, dateSGT: "2026-07-01", venue: "Dallas, USA",           home: {group:"E", slot:"2nd"}, away: {group:"I", slot:"2nd"} },  // Ivory Coast vs Norway
     { match: 79, dateSGT: "2026-07-01", venue: "Mexico City, Mexico",   home: {group:"A", slot:"1st"}, away: {group:"3rd", from:["E"]} }, // Mexico vs Ecuador
     { match: 80, dateSGT: "2026-07-02", venue: "Atlanta, USA",          home: {group:"L", slot:"1st"}, away: {group:"3rd", from:["K"]} }, // England vs DR Congo
     { match: 81, dateSGT: "2026-07-02", venue: "Seattle, USA",          home: {group:"G", slot:"1st"}, away: {group:"3rd", from:["I"]} }, // Belgium vs Senegal
@@ -864,6 +869,23 @@
     { match: 96, dateSGT: "2026-07-08", venue: "Vancouver, Canada",     home: {r32: 85}, away: {r32: 88} }, // Switzerland/Algeria vs Colombia/Ghana
   ];
 
+
+  // Reads ESPN's own "details" array (already included in every scoreboard
+  // response, no extra API call needed) to detect a penalty shootout and
+  // tally the score per team. Returns {homeScore, awayScore} or null if
+  // this match did not go to a shootout.
+  function getShootoutScore(comp, homeTeamId, awayTeamId){
+    const details = comp.details || [];
+    const shootoutGoals = details.filter(d => d.shootout === true && d.scoringPlay);
+    if(!shootoutGoals.length) return null;
+    let homeScore = 0, awayScore = 0;
+    shootoutGoals.forEach(g => {
+      const teamId = g.team && g.team.id;
+      if(teamId === homeTeamId) homeScore++;
+      else if(teamId === awayTeamId) awayScore++;
+    });
+    return {homeScore, awayScore};
+  }
 
   function renderEventsTimelineHtml(events){
     if(!events || !events.length) return "";
@@ -923,6 +945,21 @@
 
     const showScores = state === "in" || state === "post" || completed;
 
+    // Penalty shootout detection: only relevant for completed knockout matches
+    const shootout = (state === "post" || completed) && home && away
+      ? getShootoutScore(comp, home.team.id, away.team.id)
+      : null;
+    let pkNote = "";
+    if(shootout){
+      const winnerName = shootout.homeScore > shootout.awayScore
+        ? (home.team.shortDisplayName || home.team.displayName)
+        : (away.team.shortDisplayName || away.team.displayName);
+      const pkScoreStr = shootout.homeScore > shootout.awayScore
+        ? `${shootout.homeScore}-${shootout.awayScore}`
+        : `${shootout.awayScore}-${shootout.homeScore}`;
+      pkNote = `<div class="pk-note">${escapeHtml(winnerName)} won ${pkScoreStr} on penalties</div>`;
+    }
+
     function row(team, score, isWin, otherIsWin){
       const cls = "team-row" + (showScores && isWin ? " winner" : "") + (showScores && otherIsWin && !isWin ? " loser" : "");
       return `<div class="${cls}">
@@ -941,6 +978,7 @@
       </div>
       ${row(home, homeScore, homeWin, awayWin)}
       ${row(away, awayScore, awayWin, homeWin)}
+      ${pkNote}
       ${timelineHtml}
       <div class="match-bottom">
         <span>${escapeHtml(venue)}</span>
@@ -1107,6 +1145,7 @@
     let homeScoreHtml = "", awayScoreHtml = "";
     let homeRowCls = "", awayRowCls = "";
     let timelineHtml = "";
+    let pkNote = "";
 
     if(espnEvent){
       const comp = espnEvent.competitions[0];
@@ -1131,6 +1170,19 @@
         awayScoreHtml = `<span class="score">${escapeHtml(awayC?awayC.score:"0")}</span>`;
         if(homeC&&homeC.winner) homeRowCls = " winner-row";
         if(awayC&&awayC.winner) awayRowCls = " winner-row";
+
+        if(homeC && awayC && homeTeam && awayTeam){
+          const shootout = getShootoutScore(comp, homeC.team.id, awayC.team.id);
+          if(shootout){
+            const winnerName = shootout.homeScore > shootout.awayScore
+              ? (homeTeam.shortDisplayName || homeTeam.displayName)
+              : (awayTeam.shortDisplayName || awayTeam.displayName);
+            const pkScoreStr = shootout.homeScore > shootout.awayScore
+              ? `${shootout.homeScore}-${shootout.awayScore}`
+              : `${shootout.awayScore}-${shootout.homeScore}`;
+            pkNote = `<div class="pk-note">${escapeHtml(winnerName)} won ${pkScoreStr} on penalties</div>`;
+          }
+        }
       } else {
         whenHtml = `<span class="r32-when">${escapeHtml(fmtMatchTimeSGT(comp.date))} SGT</span>`;
       }
@@ -1162,6 +1214,7 @@
       ${teamSlotHtml(homeTeam, homeScoreHtml, homeRowCls)}
       <div class="r32-vs">vs</div>
       ${teamSlotHtml(awayTeam, awayScoreHtml, awayRowCls)}
+      ${pkNote}
       ${timelineHtml}
       <div class="r32-venue">${escapeHtml(fix.venue)}</div>
     </div>`;
@@ -1482,7 +1535,7 @@
       .toLocaleDateString("en-GB",{day:"numeric",month:"short",timeZone:SGT_TZ});
 
     let stateClass = "", whenHtml = `<span class="r32-when">${escapeHtml(dateStr)} SGT</span>`;
-    let homeScoreHtml = "", awayScoreHtml = "", homeRowCls = "", awayRowCls = "", timelineHtml = "";
+    let homeScoreHtml = "", awayScoreHtml = "", homeRowCls = "", awayRowCls = "", timelineHtml = "", pkNote = "";
 
     if(liveEvent){
       const comp = liveEvent.competitions[0];
@@ -1501,6 +1554,19 @@
         awayScoreHtml = `<span class="score">${escapeHtml(awayC?awayC.score:"0")}</span>`;
         if(homeC&&homeC.winner) homeRowCls = " winner-row";
         if(awayC&&awayC.winner) awayRowCls = " winner-row";
+
+        if(homeC && awayC){
+          const shootout = getShootoutScore(comp, homeC.team.id, awayC.team.id);
+          if(shootout){
+            const winnerName = shootout.homeScore > shootout.awayScore
+              ? (homeTeam.shortDisplayName || homeTeam.displayName)
+              : (awayTeam.shortDisplayName || awayTeam.displayName);
+            const pkScoreStr = shootout.homeScore > shootout.awayScore
+              ? `${shootout.homeScore}-${shootout.awayScore}`
+              : `${shootout.awayScore}-${shootout.homeScore}`;
+            pkNote = `<div class="pk-note">${escapeHtml(winnerName)} won ${pkScoreStr} on penalties</div>`;
+          }
+        }
       } else {
         whenHtml = `<span class="r32-when">${escapeHtml(fmtMatchTimeSGT(comp.date))} SGT</span>`;
       }
@@ -1540,6 +1606,7 @@
       ${homeHtml}
       <div class="r32-vs">vs</div>
       ${awayHtml}
+      ${pkNote}
       ${timelineHtml}
       <div class="r32-venue">${escapeHtml(fix.venue)}</div>
     </div>`;
