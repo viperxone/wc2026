@@ -1116,7 +1116,7 @@
 </div>
 
 <footer>
-  Built for personal use · scores/standings from ESPN (unlimited, free) · player leaders &amp; ratings from API-Football (free tier, 100 req/day, resets 8am SGT) · all times shown in Singapore Time (SGT)<br>
+  Built for personal use · scores/standings from ESPN (unlimited, free) · player leaders &amp; ratings from API-Football (Pro plan, 7,500 req/day, resets midnight UTC / 8am SGT) · all times shown in Singapore Time (SGT)<br>
   Note: Sofascore ratings could not be integrated — their data only loads via a real browser session and blocks direct API calls, so API-Football's own rating field is used instead.
 </footer>
 
@@ -2717,16 +2717,19 @@
   const WC_SEASON = 2026;
 
   let afQuotaRemaining = null; // updated from response headers after each call
+  let afQuotaLimit = null;     // real daily cap for your plan (was wrongly hardcoded to 100)
 
   async function afFetch(path){
     const res = await fetch(AF_PROXY_URL + "?path=" + encodeURIComponent(path), {
       cache: "no-store"
     });
-    // Worker forwards API-Football's rate-limit header through unchanged
+    // Worker forwards API-Football's rate-limit headers through unchanged
     const remaining = res.headers.get("x-ratelimit-requests-remaining");
+    const limit = res.headers.get("x-ratelimit-requests-limit");
     if(remaining){ afQuotaRemaining = Number(remaining); }
+    if(limit){ afQuotaLimit = Number(limit); }
     if(!res.ok){
-      if(res.status === 429) throw new Error("Daily quota exceeded (429). Resets 8am SGT.");
+      if(res.status === 429) throw new Error("Daily quota exceeded (429). Resets midnight UTC / 8am SGT.");
       if(res.status === 403) throw new Error("Proxy rejected request — check AF_PROXY_URL / Worker CORS origin.");
       throw new Error("API-Football HTTP " + res.status);
     }
@@ -2746,9 +2749,12 @@
       el.className = "af-quota";
       if(mini) mini.textContent = "API-Football: not checked yet";
     } else {
-      txt.textContent = afQuotaRemaining + " / 100 requests left today";
-      el.className = "af-quota" + (afQuotaRemaining < 20 ? " low" : afQuotaRemaining < 50 ? " ok" : "");
-      if(mini) mini.textContent = "API-Football: " + afQuotaRemaining + "/100 left today" + (afQuotaRemaining === 0 ? " ⚠️" : "");
+      const limitLabel = afQuotaLimit != null ? afQuotaLimit : "?";
+      const pctLeft = afQuotaLimit ? (afQuotaRemaining / afQuotaLimit) : 1;
+      const level = pctLeft < 0.05 ? " low" : pctLeft < 0.15 ? " ok" : "";
+      txt.textContent = afQuotaRemaining + " / " + limitLabel + " requests left today";
+      el.className = "af-quota" + level;
+      if(mini) mini.textContent = "API-Football: " + afQuotaRemaining + "/" + limitLabel + " left today" + (afQuotaRemaining === 0 ? " ⚠️" : "");
     }
   }
 
@@ -3041,8 +3047,9 @@
         });
 
         page++;
-        // Safety valve: never exceed remaining quota mid-loop
-        if(afQuotaRemaining != null && afQuotaRemaining < 5){
+        // Safety valve: never exceed remaining quota mid-loop (stop with a
+        // buffer once under 2% of the daily cap remains — scales with plan size)
+        if(afQuotaRemaining != null && afQuotaLimit != null && afQuotaRemaining < afQuotaLimit * 0.02){
           statusNote.textContent = "Stopped early — quota running low. Rankings may be incomplete.";
           break;
         }
