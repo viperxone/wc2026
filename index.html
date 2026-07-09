@@ -1000,9 +1000,31 @@
       </div>
     </div>
 
+    <h3 style="font-family:var(--disp); font-weight:800; font-size:13px; letter-spacing:0.6px; text-transform:uppercase; color:var(--paper); margin: 18px 0 10px;">Team Stats <span style="color:var(--paper-faint); font-weight:500; text-transform:none; letter-spacing:0;">— from every completed match this tournament, group stage + knockouts</span></h3>
     <div class="bottom-grid" style="margin-bottom:14px;">
       <div class="col-card">
-        <h3>Most Cards <span style="color:var(--paper-faint); font-weight:500;">(top 5, yellow + red)</span></h3>
+        <h3>Most Goals <span style="color:var(--paper-faint); font-weight:500;">(top 5)</span></h3>
+        <div class="lead-list" id="teamGoalsList"><div class="skel" style="height:140px;"></div></div>
+      </div>
+      <div class="col-card">
+        <h3>Most Clean Sheets <span style="color:var(--paper-faint); font-weight:500;">(top 5)</span></h3>
+        <div class="lead-list" id="teamCleanSheetsList"><div class="skel" style="height:140px;"></div></div>
+      </div>
+    </div>
+    <div class="bottom-grid" style="margin-bottom:14px;">
+      <div class="col-card">
+        <h3>Most Conceded <span style="color:var(--paper-faint); font-weight:500;">(top 5)</span></h3>
+        <div class="lead-list" id="teamConcededList"><div class="skel" style="height:140px;"></div></div>
+      </div>
+      <div class="col-card">
+        <h3>Most Cards <span style="color:var(--paper-faint); font-weight:500;">(top 5, team total)</span></h3>
+        <div class="lead-list" id="teamCardsList"><div class="skel" style="height:140px;"></div></div>
+      </div>
+    </div>
+
+    <div class="bottom-grid" style="margin-bottom:14px;">
+      <div class="col-card">
+        <h3>Most Cards (Player) <span style="color:var(--paper-faint); font-weight:500;">(top 5, yellow + red)</span></h3>
         <div class="lead-list" id="cardsRaceList"><div class="skel" style="height:140px;"></div></div>
       </div>
       <div class="col-card">
@@ -1901,6 +1923,7 @@
 
       renderScoreboardSections(scoreboard, liveEventsByTeamPair);
       renderNextUpPanel(scoreboard);
+      renderTeamGoalStats(scoreboard);
       const groups = renderStandingsSections(standings);
       renderR32(groups, scoreboard, liveEventsByTeamPair);
       const r32WinnerLookup = renderR16(scoreboard, groups, liveEventsByTeamPair);
@@ -1921,6 +1944,64 @@
       isLoading = false;
       setTimeout(()=> btn.classList.remove("spinning"), 400);
     }
+  }
+
+  // Team-level goals/clean-sheets, computed entirely from the ESPN scoreboard
+  // data we already fetch (group stage + every knockout round) — no extra
+  // API-Football calls needed.
+  function computeTeamGoalStats(scoreboard){
+    const events = (scoreboard && scoreboard.events) || [];
+    const tally = {};
+    events.forEach(ev => {
+      const comp = ev.competitions && ev.competitions[0];
+      if(!comp) return;
+      const state = comp.status && comp.status.type && comp.status.type.state;
+      if(state !== "post") return;
+      const comps = comp.competitors || [];
+      if(comps.length !== 2) return;
+      const [c1, c2] = comps;
+      [[c1,c2],[c2,c1]].forEach(([me, opp]) => {
+        const team = me.team;
+        if(!team) return;
+        const id = team.id;
+        if(!tally[id]){
+          const logo = (team.logos && team.logos[0] && team.logos[0].href) || team.logo;
+          tally[id] = {name: team.shortDisplayName || team.displayName, logo, gf:0, ga:0, played:0, cleanSheets:0};
+        }
+        const gf = Number(me.score) || 0;
+        const ga = Number(opp.score) || 0;
+        tally[id].gf += gf;
+        tally[id].ga += ga;
+        tally[id].played += 1;
+        if(ga === 0) tally[id].cleanSheets += 1;
+      });
+    });
+    return Object.values(tally);
+  }
+
+  function renderTeamGoalStats(scoreboard){
+    const teams = computeTeamGoalStats(scoreboard);
+
+    const byGoals = teams.slice().sort((a,b) => b.gf - a.gf);
+    $("teamGoalsList").innerHTML = renderAfTeamLeadList(
+      byGoals.map(t => ({name: t.name, photo: t.logo, value: `${t.gf} (${t.played} pl)`})),
+      "Goals",
+      "No completed matches yet."
+    );
+
+    const byCleanSheets = teams.slice().sort((a,b) => b.cleanSheets - a.cleanSheets);
+    $("teamCleanSheetsList").innerHTML = renderAfTeamLeadList(
+      byCleanSheets.map(t => ({name: t.name, photo: t.logo, value: `${t.cleanSheets} (${t.played} pl)`})),
+      "Clean Sheets",
+      "No completed matches yet."
+    );
+
+    const byConceded = teams.slice().sort((a,b) => b.ga - a.ga);
+    $("teamConcededList").innerHTML = renderAfTeamLeadList(
+      byConceded.map(t => ({name: t.name, photo: t.logo, value: `${t.ga} (${t.played} pl)`})),
+      "Conceded",
+      "No completed matches yet."
+    );
   }
 
   function hasLiveGame(scoreboard){
@@ -2459,6 +2540,23 @@
     return null;
   }
 
+  function renderAfTeamLeadList(list, valueLabel, emptyHtml){
+    if(!list || !list.length) return emptyNote(emptyHtml);
+    const head = `<div class="lead-row head"><span>#</span><span>Team</span><span>${escapeHtml(valueLabel)}</span></div>`;
+    const rows = list.slice(0,5).map((t,i)=>{
+      const rankCls = i===0 ? " rank1" : "";
+      return `<div class="lead-row${rankCls}">
+        <span class="rk">${i+1}</span>
+        <span class="pname">
+          <img src="${t.photo || ''}" alt="" loading="lazy" onerror="this.style.opacity=0">
+          <span class="pinfo"><div class="nm">${escapeHtml(t.name)}</div></span>
+        </span>
+        <span class="val">${t.value}</span>
+      </div>`;
+    }).join("");
+    return head + rows;
+  }
+
   function renderAfLeadList(list, valueLabel, emptyHtml){
     if(!list || !list.length) return emptyNote(emptyHtml);
     const head = `<div class="lead-row head"><span>#</span><span>Player</span><span>${escapeHtml(valueLabel)}</span></div>`;
@@ -2637,10 +2735,36 @@
         "Cards",
         `No card data returned yet.`
       );
-      const cardsLeader = cardsRanked[0] || null;
-      if(cardsLeader){
-        $("statMostCards").innerHTML = `<img src="${cardsLeader.photo||''}" onerror="this.style.display='none'">${escapeHtml(cardsLeader.name)}`;
-        $("statMostCardsSub").textContent = `${cardsLeader.yellow}🟨 ${cardsLeader.red}🟥 — ${cardsLeader.team||""}`;
+
+      // Sidebar widget shows the TEAM with the most cards, not an individual
+      // player — aggregate the same yellow/red responses by team instead.
+      const teamCardTotals = {};
+      (yellowResp.response || []).forEach(p => {
+        const team = p.statistics && p.statistics[0] && p.statistics[0].team;
+        if(!team) return;
+        const key = team.id;
+        teamCardTotals[key] = teamCardTotals[key] || {name: team.name, logo: team.logo, yellow: 0, red: 0};
+        teamCardTotals[key].yellow += (p.statistics[0].cards && p.statistics[0].cards.yellow) || 0;
+      });
+      (redResp.response || []).forEach(p => {
+        const team = p.statistics && p.statistics[0] && p.statistics[0].team;
+        if(!team) return;
+        const key = team.id;
+        teamCardTotals[key] = teamCardTotals[key] || {name: team.name, logo: team.logo, yellow: 0, red: 0};
+        teamCardTotals[key].red += (p.statistics[0].cards && p.statistics[0].cards.red) || 0;
+      });
+      const teamCardsRanked = Object.values(teamCardTotals)
+        .map(t => ({...t, value: t.yellow + t.red * 2}))
+        .sort((a,b) => b.value - a.value);
+      $("teamCardsList").innerHTML = renderAfTeamLeadList(
+        teamCardsRanked.map(t => ({name: t.name, photo: t.logo, value: `${t.yellow}🟨${t.red ? " " + t.red + "🟥" : ""}`})),
+        "Cards",
+        "No card data returned yet."
+      );
+      const teamCardsLeader = teamCardsRanked[0] || null;
+      if(teamCardsLeader){
+        $("statMostCards").innerHTML = `<img src="${teamCardsLeader.logo||''}" onerror="this.style.display='none'">${escapeHtml(teamCardsLeader.name)}`;
+        $("statMostCardsSub").textContent = `${teamCardsLeader.yellow}🟨 ${teamCardsLeader.red}🟥 combined`;
       }
 
       // Top Player = combined G+A across the two lists we already have
