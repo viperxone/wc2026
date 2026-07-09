@@ -460,6 +460,60 @@
   }
   .match-group{ font-family:var(--mono); font-size:10px; color:var(--paper-faint); text-align:right;}
 
+  /* ---------- Live match tabs: Lineups / Stats / Ratings ---------- */
+  .live-tabs{
+    margin-top:12px; padding-top:11px; border-top:1px solid var(--line);
+  }
+  .lt-tabbar{ display:flex; gap:6px; margin-bottom:10px; }
+  .lt-tab{
+    font-family: var(--body); font-weight:700; font-size:11.5px;
+    color: var(--paper-faint);
+    background: rgba(255,255,255,0.02);
+    border:1px solid var(--line);
+    padding:5px 12px;
+    border-radius:100px;
+    cursor:pointer;
+    transition: all .15s;
+  }
+  .lt-tab.active{ color:var(--pitch-0); background:var(--gold); border-color:var(--gold); }
+  .lt-tab:not(.active):hover{ color:var(--paper); border-color:var(--line-strong); }
+  .lt-panel{ display:none; }
+  .lt-panel.active{ display:block; }
+  .lt-empty{ font-size:11px; color:var(--paper-faint); font-style:italic; padding:4px 0; }
+
+  .lt-stat-row{ margin-bottom:9px; }
+  .lt-stat-row .lt-stat-val{ font-family:var(--mono); font-weight:700; font-size:12px; color:var(--paper); }
+  .lt-stat-row{ display:grid; grid-template-columns: 46px 1fr 46px; align-items:center; gap:8px; }
+  .lt-stat-val.left{ text-align:right; }
+  .lt-stat-val.right{ text-align:left; }
+  .lt-stat-label{
+    font-family: var(--mono); font-size:9.5px; letter-spacing:0.3px;
+    color: var(--paper-faint); text-align:center; text-transform:uppercase;
+    grid-column: 2; grid-row: 1;
+  }
+  .lt-stat-bar{
+    grid-column: 1 / -1; grid-row: 2;
+    height:4px; border-radius:2px; background: rgba(255,255,255,0.06);
+    overflow:hidden; margin-top:4px;
+  }
+  .lt-stat-bar-fill{ height:100%; background: var(--gold); border-radius:2px; }
+
+  .lt-lineups-grid{ display:grid; grid-template-columns: repeat(2,1fr); gap:14px; }
+  @media (max-width:400px){ .lt-lineups-grid{ grid-template-columns:1fr; } }
+  .lt-lineup-col{}
+  .lt-formation{
+    font-family: var(--mono); font-size:10px; color:var(--gold-bright);
+    letter-spacing:0.4px; margin-bottom:6px;
+  }
+  .lt-player-row{
+    display:flex; align-items:center; justify-content:space-between; gap:8px;
+    font-size:11.5px; color:var(--paper-dim);
+    padding:3px 0; border-top:1px solid var(--line);
+  }
+  .lt-player-row:first-of-type{ border-top:none; }
+  .lt-num{ font-family:var(--mono); color:var(--paper-faint); flex:0 0 auto; margin-right:6px; }
+  .lt-rating{ font-family:var(--mono); font-weight:700; color:var(--gold-bright); }
+
   .team-row{
     display:flex; align-items:center; justify-content:space-between;
     padding:4px 0;
@@ -1348,6 +1402,18 @@
     const liveClass = state === "in" ? " is-live" : "";
     const timelineHtml = (state === "in" || state === "post") ? renderEventsTimelineHtml(eventsTimeline) : "";
 
+    const liveTabsHtml = state === "in" ? `
+      <div class="live-tabs" data-espn-id="${escapeHtml(String(ev.id))}">
+        <div class="lt-tabbar">
+          <button class="lt-tab active" data-tab="stats">Stats</button>
+          <button class="lt-tab" data-tab="lineups">Lineups</button>
+          <button class="lt-tab" data-tab="ratings">Ratings</button>
+        </div>
+        <div class="lt-panel active" data-panel="stats"><div class="lt-empty">Loading stats…</div></div>
+        <div class="lt-panel" data-panel="lineups"><div class="lt-empty">Loading lineups…</div></div>
+        <div class="lt-panel" data-panel="ratings"><div class="lt-empty">Loading ratings…</div></div>
+      </div>` : "";
+
     return `<div class="match-card${liveClass}">
       <div class="match-top">
         ${tagHtml}
@@ -1357,6 +1423,7 @@
       ${row(away, awayScore, awayWin, homeWin)}
       ${pkNote}
       ${timelineHtml}
+      ${liveTabsHtml}
       <div class="match-bottom">
         <span>${escapeHtml(venue)}</span>
         <span>${state === "pre" ? escapeHtml(fmtDateShortSGT(comp.date)) : ""}</span>
@@ -2030,6 +2097,140 @@
       ? live.map(ev => renderMatchCard(ev, eventsForMatch(ev))).join("")
       : emptyNote("No matches in progress right now.");
     $("currentMeta").textContent = live.length ? live.length + " live" : "none live";
+
+    wireLiveTabs();
+    live.forEach(ev => {
+      const comp = ev.competitions[0];
+      const home = (comp.competitors||[]).find(c => c.homeAway === "home");
+      const away = (comp.competitors||[]).find(c => c.homeAway === "away");
+      if(!home || !away) return;
+      const n1 = normalizeTeamName(home.team.shortDisplayName || home.team.displayName);
+      const n2 = normalizeTeamName(away.team.shortDisplayName || away.team.displayName);
+      const fixtureId = liveFixtureIdByPair[n1+"|"+n2] || liveFixtureIdByPair[n2+"|"+n1] || null;
+      if(fixtureId) populateLiveTabs(ev.id, fixtureId, home.team, away.team);
+    });
+  }
+
+  // Tab-switching is wired fresh each render since currentGrid.innerHTML is
+  // fully replaced every 30s refresh (cheap — just click handlers, no data).
+  function wireLiveTabs(){
+    document.querySelectorAll(".live-tabs").forEach(container => {
+      container.querySelectorAll(".lt-tab").forEach(btn => {
+        btn.addEventListener("click", () => {
+          container.querySelectorAll(".lt-tab").forEach(b => b.classList.toggle("active", b === btn));
+          const tab = btn.dataset.tab;
+          container.querySelectorAll(".lt-panel").forEach(p => p.classList.toggle("active", p.dataset.panel === tab));
+        });
+      });
+    });
+  }
+
+  async function populateLiveTabs(espnId, fixtureId, homeTeam, awayTeam){
+    const container = document.querySelector(`.live-tabs[data-espn-id="${espnId}"]`);
+    if(!container) return;
+
+    const homeAfId = await resolveAfTeamId(homeTeam.shortDisplayName || homeTeam.displayName);
+    const awayAfId = await resolveAfTeamId(awayTeam.shortDisplayName || awayTeam.displayName);
+
+    const setPanel = (name, html) => {
+      const panel = container.querySelector(`[data-panel="${name}"]`);
+      if(panel) panel.innerHTML = html;
+    };
+
+    try{
+      const resp = await afFetch(`/fixtures/statistics?fixture=${fixtureId}`);
+      updateQuotaDisplay();
+      setPanel("stats", renderStatsHtml(resp.response || [], homeAfId, awayAfId));
+    }catch(e){
+      console.error("stats fetch failed", e);
+      setPanel("stats", `<div class="lt-empty">Stats unavailable right now.</div>`);
+    }
+
+    try{
+      const resp = await afFetch(`/fixtures/lineups?fixture=${fixtureId}`);
+      updateQuotaDisplay();
+      setPanel("lineups", renderLineupsHtml(resp.response || [], homeAfId, awayAfId));
+    }catch(e){
+      console.error("lineups fetch failed", e);
+      setPanel("lineups", `<div class="lt-empty">Lineups unavailable right now.</div>`);
+    }
+
+    try{
+      const resp = await afFetch(`/fixtures/players?fixture=${fixtureId}`);
+      updateQuotaDisplay();
+      setPanel("ratings", renderRatingsHtml(resp.response || [], homeAfId, awayAfId));
+    }catch(e){
+      console.error("ratings fetch failed", e);
+      setPanel("ratings", `<div class="lt-empty">Ratings unavailable right now.</div>`);
+    }
+  }
+
+  function renderStatsHtml(statsArr, homeAfId, awayAfId){
+    if(!statsArr || statsArr.length < 2) return `<div class="lt-empty">Stats not published yet.</div>`;
+    const homeStats = statsArr.find(s => s.team && s.team.id === homeAfId) || statsArr[0];
+    const awayStats = statsArr.find(s => s.team && s.team.id === awayAfId) || statsArr[1];
+    function getVal(block, type){
+      const found = (block.statistics || []).find(s => s.type === type);
+      return found ? found.value : null;
+    }
+    const wanted = ["Ball Possession", "Total Shots", "Shots on Goal", "Corner Kicks", "Fouls", "Passes %"];
+    const rows = wanted.map(type => {
+      let hv = getVal(homeStats, type);
+      let av = getVal(awayStats, type);
+      if(hv == null && av == null) return "";
+      hv = hv == null ? 0 : hv;
+      av = av == null ? 0 : av;
+      const hNum = parseFloat(String(hv).replace("%","")) || 0;
+      const aNum = parseFloat(String(av).replace("%","")) || 0;
+      const total = (hNum + aNum) || 1;
+      const hPct = Math.round(hNum / total * 100);
+      return `<div class="lt-stat-row">
+        <span class="lt-stat-val left">${escapeHtml(String(hv))}</span>
+        <span class="lt-stat-label">${escapeHtml(type)}</span>
+        <span class="lt-stat-val right">${escapeHtml(String(av))}</span>
+        <div class="lt-stat-bar"><div class="lt-stat-bar-fill" style="width:${hPct}%;"></div></div>
+      </div>`;
+    }).filter(Boolean).join("");
+    return rows || `<div class="lt-empty">Stats not published yet.</div>`;
+  }
+
+  function renderLineupsHtml(lineupsArr, homeAfId, awayAfId){
+    if(!lineupsArr || lineupsArr.length < 2){
+      return `<div class="lt-empty">Lineups not published yet — usually posted 20-40 min before kickoff.</div>`;
+    }
+    const homeL = lineupsArr.find(l => l.team && l.team.id === homeAfId) || lineupsArr[0];
+    const awayL = lineupsArr.find(l => l.team && l.team.id === awayAfId) || lineupsArr[1];
+    function col(lineup){
+      if(!lineup) return "";
+      const xi = (lineup.startXI || []).map(p => p.player).filter(Boolean);
+      const rows = xi.map(p => `<div class="lt-player-row"><span class="lt-num">${escapeHtml(String(p.number || ""))}</span><span>${escapeHtml(p.name || "")}</span></div>`).join("");
+      return `<div class="lt-lineup-col">
+        <div class="lt-formation">${escapeHtml(lineup.formation || "—")}</div>
+        ${rows || '<div class="lt-empty">No XI listed.</div>'}
+      </div>`;
+    }
+    return `<div class="lt-lineups-grid">${col(homeL)}${col(awayL)}</div>`;
+  }
+
+  function renderRatingsHtml(playersArr, homeAfId, awayAfId){
+    if(!playersArr || playersArr.length < 2) return `<div class="lt-empty">Ratings not available yet.</div>`;
+    function col(block){
+      if(!block) return `<div class="lt-lineup-col"><div class="lt-empty">No ratings yet.</div></div>`;
+      const list = (block.players || [])
+        .map(p => {
+          const stat = p.statistics && p.statistics[0];
+          const rating = stat && stat.games && stat.games.rating ? parseFloat(stat.games.rating) : null;
+          const minutes = stat && stat.games && stat.games.minutes;
+          return {name: p.player.name, rating, minutes};
+        })
+        .filter(p => p.rating && p.minutes)
+        .sort((a,b) => b.rating - a.rating);
+      const rows = list.slice(0,6).map(p => `<div class="lt-player-row"><span>${escapeHtml(p.name)}</span><span class="lt-rating">${p.rating.toFixed(1)}</span></div>`).join("");
+      return `<div class="lt-lineup-col">${rows || '<div class="lt-empty">No ratings yet.</div>'}</div>`;
+    }
+    const homeBlock = playersArr.find(b => b.team && b.team.id === homeAfId) || playersArr[0];
+    const awayBlock = playersArr.find(b => b.team && b.team.id === awayAfId) || playersArr[1];
+    return `<div class="lt-lineups-grid">${col(homeBlock)}${col(awayBlock)}</div>`;
   }
 
   function renderStandingsSections(standingsRoot){
@@ -2600,6 +2801,10 @@
   // at most a handful of calls even when several games are live at once.
   // ============================================================
   let liveEventsByTeamPair = {};
+  // Fixture IDs for currently-live matches, keyed by team-pair — reused by the
+  // Lineups/Stats/Ratings tabs so they don't need a separate "which fixture"
+  // lookup call.
+  let liveFixtureIdByPair = {};
   // Finished-match events never change once the final whistle blows, so we cache
   // them by team-pair across refreshes instead of re-fetching every 30s.
   const finishedEventsCache = {};
@@ -2609,6 +2814,16 @@
       const liveResp = await afFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=1H-HT-2H-ET-P-BT-LIVE`);
       updateQuotaDisplay();
       const liveFixtures = liveResp.response || [];
+
+      const newFixtureIdLookup = {};
+      liveFixtures.forEach(fx => {
+        const homeName = normalizeTeamName(fx.teams && fx.teams.home && fx.teams.home.name);
+        const awayName = normalizeTeamName(fx.teams && fx.teams.away && fx.teams.away.name);
+        const fixtureId = fx.fixture && fx.fixture.id;
+        if(!homeName || !awayName || !fixtureId) return;
+        newFixtureIdLookup[homeName+"|"+awayName] = fixtureId;
+      });
+      liveFixtureIdByPair = newFixtureIdLookup;
 
       // Also pull recently finished matches (last 4 days) so completed R16/R32
       // cards keep their scorer/card timeline after full time.
@@ -2985,7 +3200,6 @@
 
   async function renderNextUpPanel(scoreboard){
     const panel = $("nextUpPanel");
-    if(hasLiveGame(scoreboard)){ panel.innerHTML = ""; return; }
     const next = findNextMatch(scoreboard);
     if(!next){ panel.innerHTML = ""; return; }
 
@@ -3013,7 +3227,7 @@
 
     panel.innerHTML = `
       <div class="nextup-panel">
-        <div class="nextup-head">Next Up — while you wait</div>
+        <div class="nextup-head">Next Up</div>
         <div class="nextup-teams">
           <div class="nextup-team">${teamImgHtml(homeTeam,32)}<span class="nm">${escapeHtml(homeName)}</span></div>
           <span class="nextup-vs">vs</span>
