@@ -1,75 +1,47 @@
-// WC2026 Dashboard — service worker
-// Two jobs only:
-//  1. Cache the app shell (this file's own HTML/manifest) so the dashboard
-//     opens instantly and still opens with no signal at all.
-//  2. For live data (ESPN, API-Football via the Cloudflare proxy), always
-//     try the network first — freshness matters for scores — but fall back
-//     to the last successful response if the network fails, rather than
-//     leaving the UI blank.
-// Bump these version strings whenever this file changes, so old caches get
-// cleared out on the next visit instead of serving stale app code forever.
+// THFC Dashboard service worker.
+// Strategy: cache-first for the app shell (index.html, manifest — the bundle
+// is inlined into index.html so it's covered automatically), network-first
+// for anything else (so news/data always tries fresh before falling back).
+// Bump CACHE_NAME whenever you ship a new build so old clients pick it up.
+const CACHE_NAME = 'thfc-dashboard-v1';
+const SHELL_FILES = ['./', './index.html', './manifest.json'];
 
-const SHELL_CACHE = "wc2026-shell-v1";
-const RUNTIME_CACHE = "wc2026-runtime-v1";
-const SHELL_FILES = ["./", "./index.html", "./manifest.json"];
-
-self.addEventListener("install", (event) => {
+self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(SHELL_CACHE).then((cache) =>
-      Promise.all(SHELL_FILES.map((f) => cache.add(f).catch(() => {})))
-    )
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_FILES))
   );
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
+self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((k) => k !== SHELL_CACHE && k !== RUNTIME_CACHE)
-          .map((k) => caches.delete(k))
-      )
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
     )
   );
   self.clients.claim();
 });
 
-self.addEventListener("fetch", (event) => {
-  const req = event.request;
-  if (req.method !== "GET") return; // never intercept POST etc.
+self.addEventListener('fetch', (event) => {
+  const { request } = event;
+  if (request.method !== 'GET') return;
 
-  const url = new URL(req.url);
-  const isLiveData =
-    url.hostname.includes("espn.com") || url.hostname.includes("workers.dev");
-
-  if (isLiveData) {
-    // Network-first: live scores must stay fresh. Only fall back to the
-    // last cached response if the network call fails outright.
+  // App shell: cache-first (instant load, works offline)
+  if (SHELL_FILES.some((f) => request.url.endsWith(f.replace('./', '')) || request.url.endsWith('/'))) {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(RUNTIME_CACHE).then((cache) => cache.put(req, copy));
-          return res;
-        })
-        .catch(() => caches.match(req))
+      caches.match(request).then((cached) => cached || fetch(request))
     );
     return;
   }
 
-  // App shell: serve from cache instantly if we have it, refresh in the
-  // background so the next load picks up any changes.
+  // Everything else (news feeds, future API calls): network-first, cache as fallback
   event.respondWith(
-    caches.match(req).then((cached) => {
-      const network = fetch(req)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(SHELL_CACHE).then((cache) => cache.put(req, copy));
-          return res;
-        })
-        .catch(() => cached);
-      return cached || network;
-    })
+    fetch(request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+        return response;
+      })
+      .catch(() => caches.match(request))
   );
 });
