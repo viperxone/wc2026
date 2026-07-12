@@ -3426,7 +3426,17 @@
         } else {
           const resp = await afFetch(`/coachs?team=${afId}`, 86400);
           updateQuotaDisplay();
-          const coach = (resp.response || [])[0];
+          const coaches = resp.response || [];
+          // DIAGNOSTIC: we currently trust index [0] as "the current manager."
+          // If API-Football's /coachs returns coaching history rather than
+          // just the active one, that assumption can silently pick a past
+          // manager instead. Logging the full raw list so we can see exactly
+          // what's coming back and, if needed, add real filtering (e.g. by
+          // an active/end-date field) instead of guessing at the shape here.
+          if(coaches.length > 1){
+            console.warn(`[Manager] team ${afId}: ${coaches.length} coach entries returned — using index 0. Raw:`, coaches);
+          }
+          const coach = coaches[0];
           const name = (coach && coach.name) || null;
           managerCache[afId] = name;
           setVal("manager", name || "Unavailable");
