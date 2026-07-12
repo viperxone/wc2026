@@ -1611,7 +1611,7 @@
     const key = normalizeTeamName(teamName);
     if(afTeamIdCache[key] !== undefined) return afTeamIdCache[key];
     try{
-      const resp = await afFetch(`/teams?search=${encodeURIComponent(teamName)}`);
+      const resp = await afFetch(`/teams?search=${encodeURIComponent(teamName)}`, 86400);
       updateQuotaDisplay();
       const match = (resp.response || [])[0];
       const id = (match && match.team && match.team.id) || null;
@@ -1632,7 +1632,7 @@
     const cacheKey = [homeId, awayId].sort((a,b)=>a-b).join("-");
     if(h2hCache[cacheKey]) return h2hCache[cacheKey];
     try{
-      const resp = await afFetch(`/fixtures/headtohead?h2h=${homeId}-${awayId}&last=5`);
+      const resp = await afFetch(`/fixtures/headtohead?h2h=${homeId}-${awayId}&last=5`, 21600);
       updateQuotaDisplay();
       const fixtures = resp.response || [];
       let homeWins = 0, awayWins = 0, draws = 0;
@@ -2227,7 +2227,7 @@
     };
 
     try{
-      const resp = await afFetch(`/fixtures/statistics?fixture=${fixtureId}`);
+      const resp = await afFetch(`/fixtures/statistics?fixture=${fixtureId}`, 20);
       updateQuotaDisplay();
       setPanel("stats", renderStatsHtml(resp.response || [], homeAfId, awayAfId));
     }catch(e){
@@ -2236,16 +2236,23 @@
     }
 
     try{
-      const resp = await afFetch(`/fixtures/lineups?fixture=${fixtureId}`);
+      const resp = await afFetch(`/fixtures/lineups?fixture=${fixtureId}`, 300);
       updateQuotaDisplay();
-      setPanel("lineups", renderLineupsHtml(resp.response || [], homeAfId, awayAfId));
+      const lineupsArr = resp.response || [];
+      if(lineupsArr.length < 2){
+        // DIAGNOSTIC: confirms whether this is "API-Football hasn't published
+        // lineups for this fixture yet" (provider-side, common until ~20-40
+        // min before kickoff) vs something else — check this in the console.
+        console.warn(`[Lineups] fixture ${fixtureId}: only ${lineupsArr.length} team lineup(s) in response.`);
+      }
+      setPanel("lineups", renderLineupsHtml(lineupsArr, homeAfId, awayAfId));
     }catch(e){
       console.error("lineups fetch failed", e);
       setPanel("lineups", `<div class="lt-empty">Lineups unavailable right now.</div>`);
     }
 
     try{
-      const resp = await afFetch(`/fixtures/players?fixture=${fixtureId}`);
+      const resp = await afFetch(`/fixtures/players?fixture=${fixtureId}`, 20);
       updateQuotaDisplay();
       setPanel("ratings", renderRatingsHtml(resp.response || [], homeAfId, awayAfId));
     }catch(e){
@@ -2792,7 +2799,33 @@
   let afQuotaRemaining = null; // updated from response headers after each call
   let afQuotaLimit = null;     // real daily cap for your plan (was wrongly hardcoded to 100)
 
-  async function afFetch(path){
+  // Caching layer — this is the actual fix for "intermittent Unavailable":
+  // without it, every 30s auto-refresh re-fetched manager/formation/lineups/
+  // stats/etc. from scratch for every team touched, all day, which burns
+  // through even a 7,500/day quota during a long live-match session. Each
+  // afFetch call site below now passes a TTL matched to how often that data
+  // actually changes — live match stats stay near-real-time, mostly-static
+  // data like coach names or team-id lookups get cached for hours.
+  function afCacheGet(key, ttlSeconds){
+    try{
+      const raw = localStorage.getItem("afcache:" + key);
+      if(!raw) return undefined;
+      const parsed = JSON.parse(raw);
+      if(Date.now() - parsed.ts > ttlSeconds * 1000) return undefined;
+      return parsed.data;
+    }catch(e){ return undefined; } // private-browsing/storage-disabled: fail open, just skip caching
+  }
+  function afCacheSet(key, data){
+    try{
+      localStorage.setItem("afcache:" + key, JSON.stringify({ts: Date.now(), data}));
+    }catch(e){ /* storage full/disabled — non-fatal, caching is a nice-to-have not a requirement */ }
+  }
+
+  async function afFetch(path, ttlSeconds){
+    ttlSeconds = (ttlSeconds == null) ? 20 : ttlSeconds;
+    const cached = afCacheGet(path, ttlSeconds);
+    if(cached !== undefined) return cached;
+
     const res = await fetch(AF_PROXY_URL + "?path=" + encodeURIComponent(path), {
       cache: "no-store"
     });
@@ -2810,6 +2843,7 @@
     if(json.errors && Object.keys(json.errors).length){
       throw new Error("API-Football error: " + JSON.stringify(json.errors));
     }
+    afCacheSet(path, json); // only cache clean successes, never error responses
     return json;
   }
 
@@ -2907,7 +2941,7 @@
 
   async function loadLiveEvents(){
     try{
-      const liveResp = await afFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=1H-HT-2H-ET-P-BT-LIVE`);
+      const liveResp = await afFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=1H-HT-2H-ET-P-BT-LIVE`, 20);
       updateQuotaDisplay();
       const liveFixtures = liveResp.response || [];
 
@@ -2928,7 +2962,7 @@
         const toD = new Date();
         const fromD = new Date(); fromD.setDate(fromD.getDate() - 4);
         const fmt = d => d.toISOString().slice(0,10);
-        const finResp = await afFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=FT-AET-PEN&from=${fmt(fromD)}&to=${fmt(toD)}`);
+        const finResp = await afFetch(`/fixtures?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=FT-AET-PEN&from=${fmt(fromD)}&to=${fmt(toD)}`, 600);
         updateQuotaDisplay();
         finishedFixtures = finResp.response || [];
       }catch(e){
@@ -2955,7 +2989,7 @@
         if(!homeName || !awayName) continue;
 
         try{
-          const evResp = await afFetch(`/fixtures/events?fixture=${fixtureId}`);
+          const evResp = await afFetch(`/fixtures/events?fixture=${fixtureId}`, 20);
           updateQuotaDisplay();
           const key = homeName+"|"+awayName;
           const eventsList = evResp.response || [];
@@ -2987,10 +3021,10 @@
     try{
       // ---- Cheap calls first: top scorers, assists, and cards (1 request each) ----
       const [scorersResp, assistsResp, yellowResp, redResp] = await Promise.all([
-        afFetch(`/players/topscorers?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`),
-        afFetch(`/players/topassists?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`),
-        afFetch(`/players/topyellowcards?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`),
-        afFetch(`/players/topredcards?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`)
+        afFetch(`/players/topscorers?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`, 300),
+        afFetch(`/players/topassists?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`, 300),
+        afFetch(`/players/topyellowcards?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`, 300),
+        afFetch(`/players/topredcards?league=${WC_LEAGUE_ID}&season=${WC_SEASON}`, 300)
       ]);
       updateQuotaDisplay();
 
@@ -3101,7 +3135,7 @@
 
       let page = 1, totalPages = 1;
       do {
-        const resp = await afFetch(`/players?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&page=${page}`);
+        const resp = await afFetch(`/players?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&page=${page}`, 600);
         updateQuotaDisplay();
         totalPages = (resp.paging && resp.paging.total) || 1;
 
@@ -3243,13 +3277,13 @@
   async function loadExpectedFormation(afTeamId){
     if(formationCache[afTeamId] !== undefined) return formationCache[afTeamId];
     try{
-      const fixturesResp = await afFetch(`/fixtures?team=${afTeamId}&league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=FT-AET-PEN&last=1`);
+      const fixturesResp = await afFetch(`/fixtures?team=${afTeamId}&league=${WC_LEAGUE_ID}&season=${WC_SEASON}&status=FT-AET-PEN&last=1`, 3600);
       updateQuotaDisplay();
       const fx = (fixturesResp.response || [])[0];
       const fixtureId = fx && fx.fixture && fx.fixture.id;
       if(!fixtureId){ formationCache[afTeamId] = null; return null; }
 
-      const lineupResp = await afFetch(`/fixtures/lineups?fixture=${fixtureId}`);
+      const lineupResp = await afFetch(`/fixtures/lineups?fixture=${fixtureId}`, 21600);
       updateQuotaDisplay();
       const teamLineup = (lineupResp.response || []).find(l => l.team && l.team.id === afTeamId);
       const formation = (teamLineup && teamLineup.formation) || null;
@@ -3269,9 +3303,11 @@
     try{
       let page = 1, totalPages = 1;
       const candidates = [];
+      let rawEntryCount = 0;
       do{
-        const resp = await afFetch(`/players?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&team=${afTeamId}&page=${page}`);
+        const resp = await afFetch(`/players?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&team=${afTeamId}&page=${page}`, 3600);
         updateQuotaDisplay();
+        rawEntryCount += (resp.response || []).length;
         (resp.response || []).forEach(p => {
           const stat = p.statistics && p.statistics[0];
           const rating = stat && stat.games && parseFloat(stat.games.rating);
@@ -3282,10 +3318,17 @@
         });
         totalPages = (resp.paging && resp.paging.total) || 1;
         page++;
-      } while(page <= totalPages && page <= 3); // hard cap at 3 pages to bound API cost
+      } while(page <= totalPages && page <= 5); // was capped at 3; bumped to 5 as a cheap safety margin
 
       candidates.sort((a,b) => b.rating - a.rating);
       const top = candidates[0] || null;
+      if(!top){
+        // DIAGNOSTIC: this tells us whether it's "no players returned at all"
+        // (team-ID/params issue) vs "players returned but none have a rating
+        // yet" (provider data-lag) — check this in Safari's Web Inspector
+        // console next time this happens.
+        console.warn(`[TopPlayer] team ${afTeamId}: ${rawEntryCount} player entries checked, 0 with rating+appearance.`);
+      }
       teamTopPlayerCache[afTeamId] = top;
       return top;
     }catch(e){
@@ -3381,7 +3424,7 @@
         if(managerCache[afId] !== undefined){
           setVal("manager", managerCache[afId] || "Unavailable");
         } else {
-          const resp = await afFetch(`/coachs?team=${afId}`);
+          const resp = await afFetch(`/coachs?team=${afId}`, 86400);
           updateQuotaDisplay();
           const coach = (resp.response || [])[0];
           const name = (coach && coach.name) || null;
