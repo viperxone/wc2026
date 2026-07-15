@@ -375,6 +375,23 @@
   .nextup-row:first-of-type{ border-top:none; }
   .nextup-row .lbl{ color:var(--paper-faint); }
   .nextup-row .val{ color:var(--paper); font-weight:600; text-align:right; }
+  .stat-leaders-grid{ display:grid; grid-template-columns: repeat(2,1fr); gap:14px; margin-top:14px; }
+  @media (max-width:640px){ .stat-leaders-grid{ grid-template-columns:1fr; } }
+  .stat-leader-card{
+    background: linear-gradient(165deg, var(--pitch-2), var(--pitch-1));
+    border:1px solid var(--line); border-radius: var(--radius);
+    padding:14px 15px;
+  }
+  .stat-leader-card .slc-head{
+    display:flex; align-items:center; gap:8px;
+    font-family: var(--disp); font-weight:800; font-size:15px; color:var(--paper);
+    margin-bottom:8px;
+  }
+  .stat-leader-card .slc-head img{ width:22px; height:22px; object-fit:contain; }
+  .stat-leader-row{ display:flex; justify-content:space-between; gap:8px; font-size:12px; padding:4px 0; border-top:1px solid var(--line); }
+  .stat-leader-row:first-of-type{ border-top:none; }
+  .stat-leader-row .lbl{ color:var(--paper-faint); }
+  .stat-leader-row .val{ color:var(--paper); font-weight:600; text-align:right; }
   .form-chips{ display:flex; gap:4px; }
   .form-chip{
     width:18px; height:18px; border-radius:4px; font-size:10px; font-weight:800;
@@ -957,6 +974,18 @@
     </div>
 
     <div id="nextUpPanel"></div>
+
+    <div class="section-head" style="margin-top:26px;">
+      <h2><span class="dash"></span>Team Stat Leaders</h2>
+      <span class="meta">Goals · Assists · Key Passes · Dribbles</span>
+    </div>
+    <p class="proxy-note">Limited to what API-Football's standard tier actually provides — Chances Created, Big Chances Created, and Accurate Crosses aren't in this data source (that's an Opta-tier license, not part of this subscription).</p>
+    <div class="stat-leaders-grid" id="statLeadersGrid">
+      <div class="skel" style="height:180px;"></div>
+      <div class="skel" style="height:180px;"></div>
+      <div class="skel" style="height:180px;"></div>
+      <div class="skel" style="height:180px;"></div>
+    </div>
   </section>
 
   <section class="section" id="bracket">
@@ -2007,6 +2036,7 @@
 
       renderScoreboardSections(scoreboard, liveEventsByTeamPair);
       renderNextUpPanel(scoreboard);
+      renderStatLeadersWidget();
       renderTeamGoalStats(scoreboard);
       const groups = renderStandingsSections(standings);
       renderR32(groups, scoreboard, liveEventsByTeamPair);
@@ -3269,6 +3299,106 @@
   const managerCache = {}; // API-Football team id -> coach name (persists across refreshes)
   const formationCache = {}; // API-Football team id -> formation string (or null)
   const teamTopPlayerCache = {}; // API-Football team id -> {name, photo, rating} (or null)
+  const teamStatLeadersCache = {}; // API-Football team id -> {goals, assists, keyPasses, dribblesP90} leaders
+
+  // Team Stat Leaders widget: only computes categories API-Football's
+  // standard /players response actually supports. Chances Created / Big
+  // Chances Created / Accurate Crosses are Opta-tier metrics not present in
+  // this data source — deliberately left out rather than faked.
+  const MIN_MINUTES_FOR_DRIBBLES_P90 = 180; // ~2 full matches, avoids small-sample outliers
+  async function loadTeamStatLeaders(afTeamId){
+    if(teamStatLeadersCache[afTeamId] !== undefined) return teamStatLeadersCache[afTeamId];
+    try{
+      let page = 1, totalPages = 1;
+      let bestGoals = null, bestAssists = null, bestKeyPasses = null, bestDribblesP90 = null;
+      do{
+        // Same endpoint + TTL as loadTeamTopPlayer — if that already ran for
+        // this team this hour, this is a cache hit and costs zero quota.
+        const resp = await afFetch(`/players?league=${WC_LEAGUE_ID}&season=${WC_SEASON}&team=${afTeamId}&page=${page}`, 3600);
+        updateQuotaDisplay();
+        (resp.response || []).forEach(p => {
+          const stat = p.statistics && p.statistics[0];
+          if(!stat) return;
+          const name = p.player.name;
+          const minutes = (stat.games && stat.games.minutes) || 0;
+
+          const goals = stat.goals && stat.goals.total;
+          if(goals != null && (!bestGoals || goals > bestGoals.value)){
+            bestGoals = {name, value: goals};
+          }
+          const assists = stat.goals && stat.goals.assists;
+          if(assists != null && (!bestAssists || assists > bestAssists.value)){
+            bestAssists = {name, value: assists};
+          }
+          const keyPasses = stat.passes && stat.passes.key;
+          if(keyPasses != null && (!bestKeyPasses || keyPasses > bestKeyPasses.value)){
+            bestKeyPasses = {name, value: keyPasses};
+          }
+          const dribbleSuccess = stat.dribbles && stat.dribbles.success;
+          if(dribbleSuccess != null && minutes >= MIN_MINUTES_FOR_DRIBBLES_P90){
+            const p90 = (dribbleSuccess / minutes) * 90;
+            if(!bestDribblesP90 || p90 > bestDribblesP90.value){
+              bestDribblesP90 = {name, value: p90};
+            }
+          }
+        });
+        totalPages = (resp.paging && resp.paging.total) || 1;
+        page++;
+      } while(page <= totalPages && page <= 5);
+
+      const result = { goals: bestGoals, assists: bestAssists, keyPasses: bestKeyPasses, dribblesP90: bestDribblesP90 };
+      teamStatLeadersCache[afTeamId] = result;
+      return result;
+    }catch(e){
+      console.error("team stat leaders lookup failed for team", afTeamId, e);
+      teamStatLeadersCache[afTeamId] = null;
+      return null;
+    }
+  }
+
+  async function renderStatLeadersWidget(){
+    const grid = $("statLeadersGrid");
+    if(!grid) return;
+    const teams = ["France", "Spain", "England", "Argentina"];
+
+    // Render 4 cards immediately with "Loading…" rows, fill each in as its
+    // own lookup resolves — no reason to block all four on the slowest one.
+    grid.innerHTML = teams.map(name => `
+      <div class="stat-leader-card" id="slc-${name}">
+        <div class="slc-head">${escapeHtml(name)}</div>
+        <div class="stat-leader-row"><span class="lbl">Goals</span><span class="val">Loading…</span></div>
+        <div class="stat-leader-row"><span class="lbl">Assists</span><span class="val">Loading…</span></div>
+        <div class="stat-leader-row"><span class="lbl">Key Passes</span><span class="val">Loading…</span></div>
+        <div class="stat-leader-row"><span class="lbl">Dribbles (p90)</span><span class="val">Loading…</span></div>
+      </div>`).join("");
+
+    teams.forEach(async (name) => {
+      const card = $(`slc-${name}`);
+      if(!card) return;
+      try{
+        const afId = await resolveAfTeamId(name);
+        if(!afId){
+          card.querySelectorAll(".val").forEach(v => v.textContent = "Team not found");
+          return;
+        }
+        const leaders = await loadTeamStatLeaders(afId);
+        const rows = card.querySelectorAll(".stat-leader-row .val");
+        const fmt = (entry, decimals) => entry ? `${escapeHtml(entry.name)} (${decimals ? entry.value.toFixed(decimals) : entry.value})` : "Not enough data yet";
+        if(leaders){
+          rows[0].textContent = leaders.goals ? `${leaders.goals.name} (${leaders.goals.value})` : "Not enough data yet";
+          rows[1].textContent = leaders.assists ? `${leaders.assists.name} (${leaders.assists.value})` : "Not enough data yet";
+          rows[2].textContent = leaders.keyPasses ? `${leaders.keyPasses.name} (${leaders.keyPasses.value})` : "Not enough data yet";
+          rows[3].textContent = leaders.dribblesP90 ? `${leaders.dribblesP90.name} (${leaders.dribblesP90.value.toFixed(2)})` : "Not enough data yet";
+        } else {
+          rows.forEach(v => v.textContent = "Unavailable");
+        }
+      }catch(e){
+        console.error("stat leaders render failed for", name, e);
+        card.querySelectorAll(".val").forEach(v => v.textContent = "Unavailable");
+      }
+    });
+  }
+
 
   // Expected Formation: looks at the team's most recent completed fixture and
   // reads the formation actually used. Kept to 1 fixture (not an average of
